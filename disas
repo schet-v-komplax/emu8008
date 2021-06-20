@@ -1,0 +1,73 @@
+0000	44 40 00    	JMP	0x40
+0003	00          	HLT
+*
+0008	c1          	LAB
+0009	51          	OUT	8
+000a	41          	INP	0
+000b	1a          	RAR
+000c	60 08 00    	JTC	0x8
+000f	07          	RET
+0010	0e d2       	LBI	0xd2
+0012	0d          	RST	1
+0013	55          	OUT	10
+0014	41          	INP	0
+0015	1d          	RST	3
+0016	07          	RET
+0017	00          	HLT
+0018	d0          	LCA
+0019	0e d2       	LBI	0xd2
+001b	0d          	RST	1
+001c	c2          	LAC
+001d	57          	OUT	11
+001e	36 00       	LLI	0
+0020	2e 00       	LHI	0
+0022	cf          	LBM
+0023	08          	INB
+0024	c1          	LAB
+0025	3c 50       	CPI	0x50
+0027	70 39 00    	JTS	0x39
+002a	a9          	XRB
+002b	30          	INL
+002c	d7          	LCM
+002d	10          	INC
+002e	3c 0c       	CPI	0xc
+0030	70 34 00    	JTS	0x34
+0033	aa          	XRC
+0034	c2          	LAC
+0035	5d          	OUT	14
+0036	f8          	LMA
+0037	31          	DCL
+0038	c1          	LAB
+0039	5b          	OUT	13
+003a	f8          	LMA
+003b	07          	RET
+003c	00          	HLT
+*
+0040	0e d2       	LBI	0xd2
+0042	0d          	RST	1
+0043	a8          	XRA
+0044	5b          	OUT	13
+0045	5d          	OUT	14
+0046	a8          	XRA
+0047	26 00       	LEI	0
+0049	46 4f 00    	CAL	0x4f
+004c	44 4c 00    	JMP	0x4c
+004f	f4          	LLE
+0050	2e 10       	LHI	0x10
+0052	c7          	LAM
+0053	b0          	ORA
+0054	2b          	RTZ
+0055	1d          	RST	3
+0056	20          	INE
+0057	44 4f 00    	JMP	0x4f
+005a	00          	HLT
+*
+1000	65          	OUT	18
+1001	6d          	OUT	21
+1002	75          	OUT	26
+1003	38          	<unknown>
+1004	30          	INL
+*
+1006	38          	<unknown>
+1007	00          	HLT
+*

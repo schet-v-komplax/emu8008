@@ -1,0 +1,369 @@
+/*
+ * usage: asm <source> [> <output>]
+ */
+
+#include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <ctype.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <string.h>
+#include <errno.h>
+#include <stdarg.h>
+
+// if size=0xf0 -> ORG
+struct mnemonic
+{
+    u_int8_t opcode;
+    u_int8_t size;
+    char * arg;
+};
+
+struct equ
+{
+    char * name;
+    int value;
+};
+
+static struct mnemonic mnemonics[1000];
+static struct equ equs[200];
+static char * tokens[1000];
+static int nr_tokens, nr_mnems, nr_equs;
+
+static void error(const char * mess, ...)
+{
+    va_list ap;
+    va_start(ap, mess);
+    fprintf(stderr, "\e[31;1merror: \e[0m");
+    vfprintf(stderr, mess, ap);
+    va_end(ap);
+    putc('\n', stderr);
+    exit(1);
+}
+
+static int value(char * c)
+{
+    for(int i = 0; i < nr_equs; i++) {
+        if(!strcmp(equs[i].name, c)) return equs[i].value;
+    }
+    int r = 0;
+    int mul = 10;
+    int len = strlen(c);
+    if(c[len - 1] == 'H') {
+        len--;
+        mul = 16;
+    }
+    while(len--) r = r * mul + *c++ - '0';
+    return r;
+}
+
+static int reg(char r)
+{
+    if(r == 'H') return 5;
+    if(r == 'L') return 6;
+    if(r == 'M') return 7;
+    r -= 'A';
+    if(r < 5) return r;
+    return 8;
+}
+
+static bool m_jmp(int base, char * name, char * arg)
+{
+    char * p = name + 1;
+    if(*p == 'N')
+        p++;
+    else base |= 0040;
+    if(p[1]) return false;
+    switch(*p) {
+        case 'C': break;
+        case 'Z': base += 8; break;
+        case 'S': base += 16; break;
+        case 'P': base += 24; break;
+        default: return false;
+    }
+    mnemonics[nr_mnems++] = (struct mnemonic){ base, arg ? 3 : 1, arg };
+    return true;
+}
+
+static bool m_load(char * name)
+{
+    int base, r;
+    if(strlen(name) != 3) return false;
+    
+    if(name[2] == 'I') {
+        base = 0006;
+    }
+    else {
+        base = 0300;
+        r = reg(name[2]);
+        if(r > 7) return false;
+        base |= r;
+    }
+    r = reg(name[1]);
+    if(r > 7) return false;
+    mnemonics[nr_mnems++] = (struct mnemonic){ base | (r << 3), 1, NULL };
+    return true;
+}
+
+static bool m_ar(int base, char * name)
+{
+    int r;
+    if(strlen(name) != 3) return false;
+    if(name[2] == 'I') {
+        mnemonics[nr_mnems++] = (struct mnemonic){ base + 4, 1, NULL };
+        return true;
+    }
+    r = reg(name[2]);
+    if(r > 7) return false;
+    mnemonics[nr_mnems++] = (struct mnemonic){ base + 0200 + r, 1, NULL };
+    return true;
+}
+
+static bool m_ar1(int base, char * name)
+{
+    int r;
+    if(strlen(name) != 3) return false;
+    r = reg(name[2]);
+    if(r > 7) return false;
+    mnemonics[nr_mnems++] = (struct mnemonic){ base + (r << 3), 1, NULL };
+    return true;
+}
+
+static int prep_mnemonic(char * name, char * arg)
+{
+    static int pc = 0;
+
+    if(!strcmp(name, "DB")) {
+        if(arg[0] != '"') {
+            mnemonics[nr_mnems++] = (struct mnemonic){ value(arg), 1, NULL };
+            pc++;
+        }
+        else {
+            while(*++arg != '"') {
+                mnemonics[nr_mnems++] = (struct mnemonic){ *arg, 1, NULL };
+                pc++;
+            }
+        }
+        return 2;
+    }
+    else if(!strcmp(name, "ORG")) {
+        mnemonics[nr_mnems++] = (struct mnemonic){ 0, 0xf0, arg };
+        pc = value(arg);
+        return 2;
+    }
+    else if(!strcmp(name, "HLT")) {
+        mnemonics[nr_mnems++] = (struct mnemonic){ 0, 1, NULL };
+        pc++;
+        return 1;
+    }
+    else if(!strcmp(name, "NOP")) {
+        mnemonics[nr_mnems++] = (struct mnemonic){ 0300, 1, NULL };
+        pc++;
+        return 1;
+    }
+    else if(!strcmp(name, "OUT") || !strcmp(name, "IN")) {
+        mnemonics[nr_mnems++] = (struct mnemonic){ 0101 + (value(arg) << 1), 1, NULL };
+        pc++;
+        return 2;
+    }
+    else if(name[0] == 'J') {
+        if(!strcmp(name + 1, "MP")) {
+            mnemonics[nr_mnems++] = (struct mnemonic){ 0104, 3, arg };
+            pc += 3;
+            return 2;
+        }
+        if(m_jmp(0100, name, arg))  {
+            pc += 3;
+            return 2;
+        }
+    }
+    else if(name[0] == 'C') {
+        if(!strcmp(name + 1, "ALL")) {
+            mnemonics[nr_mnems++] = (struct mnemonic){ 0106, 3, arg };
+            pc += 3;
+            return 2;
+        }
+        if(m_jmp(0102, name, arg)) {
+            pc += 3;
+            return 2;
+        }
+    }
+    else if(name[0] == 'R') {
+        if(!strcmp(name + 1, "ET")) {
+            mnemonics[nr_mnems++] = (struct mnemonic){ 0007, 1, NULL };
+            pc++;
+            return 1;
+        }
+        if(!strcmp(name + 1, "ST")) {
+            mnemonics[nr_mnems++] = (struct mnemonic){ 0005 + value(arg), 1, NULL };
+            pc++;
+            return 1;
+        }
+        if(m_jmp(0003, name, NULL)) {
+            pc++;
+            return 1;
+        }
+        if(!strcmp(name + 1, "LC")) {
+            mnemonics[nr_mnems++] = (struct mnemonic){ 0002, 1, NULL };
+            pc++;
+            return 1;
+        }
+        if(!strcmp(name + 1, "RC")) {
+            mnemonics[nr_mnems++] = (struct mnemonic){ 0012, 1, NULL };
+            pc++;
+            return 1;
+        }
+        if(!strcmp(name + 1, "AL")) {
+            mnemonics[nr_mnems++] = (struct mnemonic){ 0022, 1, NULL };
+            pc++;
+            return 1;
+        }
+        if(!strcmp(name + 1, "AR")) {
+            mnemonics[nr_mnems++] = (struct mnemonic){ 0032, 1, NULL };
+            pc++;
+            return 1;
+        }
+    }
+    else if(name[0] == 'L') {
+        if(m_load(name)) {
+            pc++;
+            if(name[2] == 'I') {
+                mnemonics[nr_mnems - 1].arg = arg;
+                mnemonics[nr_mnems - 1].size = 2;
+                return 2;
+            }
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "AD", 2)) {
+        if(m_ar(0000, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "AC", 2)) {
+        if(m_ar(0010, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "SU", 2)) {
+        if(m_ar(0020, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "SB", 2)) {
+        if(m_ar(0030, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "ND", 2)) {
+        if(m_ar(0040, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "XR", 2)) {
+        if(m_ar(0050, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "OR", 2)) {
+        if(m_ar(0060, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "CP", 2)) {
+        if(m_ar(0070, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "IN", 2)) {
+        if(m_ar1(0, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    else if(!strncmp(name, "DC", 2)) {
+        if(m_ar1(1, name)) {
+            pc++;
+            return 1;
+        }
+    }
+    
+    equs[nr_equs++] = (struct equ){ name, pc };
+    return 1;
+}
+
+int main(int argc, char * argv[])
+{
+    int fd;
+    char * buf;
+    char * com;
+    struct stat s;
+    fd = open(argv[1], O_RDONLY);
+    if(fd < 0) error("%s: %s", argv[1], strerror(errno));
+    fstat(fd, &s);
+    buf = malloc(s.st_size + 1);
+    read(fd, buf, s.st_size);
+    close(fd);
+    buf[s.st_size] = EOF;
+    
+    // tokenize
+    for(char * p = buf; *p != EOF; p++) {
+        while(true) {
+            while(isspace(*p))
+                *p++ = '\0';
+            if(*p == ';') while(*p != '\n') *p++ = '\0';
+            else break;
+        }
+        tokens[nr_tokens++] = p;
+        if(*p == '"') {
+            while(*++p != '"');
+            *++p = '\0';
+        }
+        else {
+            while(!isspace(*p)) p++;
+            *p = '\0';
+        }
+    }
+
+    // make mnemonics
+    int i =  0;
+    while(i < nr_tokens)
+        i += prep_mnemonic(tokens[i], tokens[i + 1]);
+
+    int pc = 0;
+    for(int i = 0; i < nr_mnems; i++) {
+        if(mnemonics[i].size > 3) {
+            if(mnemonics[i].size == 0xf0) {
+                lseek(1, value(mnemonics[i].arg), SEEK_SET);
+                pc = value(mnemonics[i].arg);
+            }
+        }
+        else {
+            write(1, &mnemonics[i].opcode, 1);
+            if(mnemonics[i].arg) {
+                int r;
+                if(mnemonics[i].arg[0] == '.') {
+                    r = value(mnemonics[i].arg + 1) + pc;
+                }
+                else r = value(mnemonics[i].arg);
+                write(1, &r, mnemonics[i].size - 1);
+            }
+            pc += mnemonics[i].size;
+        }
+    }
+
+    free(buf);
+    
+    return 0;
+}

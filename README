@@ -1,0 +1,119 @@
+intel i8008 emulator and some tools
+idk who would ever need it
+
+asm         -- i8008 assembler
+dis         -- i8008 disassembler
+emu         -- i8008 emulator
+.8008.asm   -- source code for main program
+
+test emulation with:
+    make asm8008
+    make emu8008
+    ./asm8008 .8008.asm > core
+    ./emu8008 core
+
+i8008 organization:
+
+registers:
+binary      hex             name            usage
+000         0               A               accumulator
+001         1               B               GP
+010         2               C               GP
+011         3               D               GP
+100         4               E               GP
+101         5               H               GP, high byte
+110         6               L               GP, low byte
+111         7               M               memory register (combination of H&L)
+-           -               P/PC            program register
+-           -               S/SP            stack register
+
+flags:
+index       symbolic code   name
+00          CF              carry
+01          ZF              zero
+10          SF              sign
+11          PF              parity
+
+8008 instruction set:
+..      0x      1x      2x      3x      4x      5x      6x      7x      8x      9x      Ax      Bx      Cx      Dx      Ex      Fx
+x0      HLT     HLT             RFC     ADI     RST 0   LAI     RET     INB     DCB             RFZ     ACI     RST 1   LBI     RET
+x1      INC     DCC             RFS     SUI     RST 2   LCI     RET     IND     DCD             RFP     SBI     RST 3   LDI     RET
+x2      INE     DCE             RTC     NDI     RST 4   LEI     RET     INH     DCH             RTZ     XRI     RST 5   LHI     RET
+x3      INL     DCL             RTS     ORI     RST 6   LLI     RET                             RTP     CPI     RST 7   LMI     RET
+x4      JFC     INP 0   CFC     INP 1   JMP     INP 2   CAL     INP 3   JFZ     INP 4   CFZ     INP 5   JMP     INP 6   CAL     INP 7
+x5      JFS     OUT 8   CFS     OUT 9   JMP     OUT 10  CAL     OUT 11  JFP     OUT 12  CFP     OUT 13  JMP     OUT 14  CAL     OUT 15
+x6      JTC     OUT 16  CTC     OUT 17  JMP     OUT 18  CAL     OUT 19  JTZ     OUT 20  CTZ     OUT 21  JMP     OUT 21  CAL     OUT 23
+x7      JTS     OUT 24  CTS     OUT 25  JMP     OUT 26  CAL     OUT 27  JTP     OUT 28  CTP     OUT 29  JMP     OUT 30  CAL     OUT 31
+x8      ADA     ADB     ADC     ADD     ADE     ADH     ADL     ADM     ACA     ACB     ACC     ACD     ACE     ACH     ACL     ACM
+x9      SUA     SUB     SUC     SUD     SUE     SUH     SUL     SUM     SBA     SBB     SBC     SBD     SBE     SBH     SBL     SBM
+xA      NDA     NDB     NDC     NDD     NDE     NDH     NDL     NDM     XRA     XRB     XRC     XRD     XRE     XRH     XRL     XRM
+xB      ORA     ORB     ORC     ORD     ORE     ORH     ORL     ORM     CPA     CPB     CPC     CPD     CPE     CPH     CPL     CPM
+xC      NOP     LAB     LAC     LAD     LAE     LAH     LAL     LAM     LBA     LBB     LBC     LBD     LBE     LBH     LBL     LBM
+xD      LCA     LCB     LCC     LCD     LCE     LCH     LCL     LCM     LDA     LDB     LDC     LDD     LDE     LDH     LDL     LDM
+xE      LEA     LEB     LEC     LED     LEE     LEH     LEL     LEM     LHA     LHB     LHC     LHD     LHE     LHH     LHL     LHM
+xF      LLA     LLB     LLC     LLD     LLE     LLH     LLL     LLM     LMA     LMB     LMC     LMD     LME     LMH     LML     HLT
+
+binary      hex             name            function
+0000000x    00+             HLT
+11111111    FF              HLT
+11000000    C0              NOP
+
+0100PPP1    41              INP P           PPP -> A
+01PPPPP1    51+             OUT P           A -> PPPPP, high 2 bits of port != 00
+
+01000100    44              JMP A           unconditionally jump <address>
+01000000    40              JFC             jump if CF=0
+01001000    48              JFZ             jump if ZF=0
+01010000    50              JFS             jump is SF=0
+01011000    58              JFP             jump is PF=0
+01100000    60              JTC             jump if CF=1
+01101000    68              JTZ             jump if ZF=1
+01110000    70              JTS             jump is SF=1
+01111000    78              JTP             jump is PF=1
+
+01000110    46              CALL A          unconditionally call <address>
+01000010    42              CFC             call if CF=0
+01001010    4A              CFZ             call if ZF=0
+01010010    52              CFS             call is SF=0
+01011010    5A              CFP             call is PF=0
+01100010    62              CTC             call if CF=1
+01101010    6A              CTZ             call if ZF=1
+01110010    72              CTS             call is SF=1
+01111010    7A              CTP             call is PF=1
+
+00000111    07              RET             unconditionally return
+00000011    03              RFC             return if CF=0
+00001011    0D              RFZ             return if ZF=0
+00010011    13              RFS             return is SF=0
+00011011    1D              RFP             return is PF=0
+00100011    23              RTC             return if CF=1
+00101011    2D              RTZ             return if ZF=1
+00110011    33              RTS             return is SF=1
+00111011    3D              RTP             return is PF=1
+
+11DDDSSS    C0+             Lds             D=S, if D=M, then [M]=S, if S=M, then D=[M]
+00DDD110    06+             LdI             D=I, if D=M, then [M]=I (I - immidiate data)
+
+10000SSS    80+             ADs             A+=S
+00000100    04              ADI             A+=I
+10001SSS    88+             ACs             A+=S+CF
+00001100    0C              AII             A+=I+CF
+10010SSS    90+             SUs             A-=S
+00010100    14              SUI             A-=I
+10011SSS    98+             SBs             A-=S+CF
+00011100    1C              SBI             A-=I+CF
+10100SSS    A0+             NDs             A&=S
+00100100    24              NDI             A&=I
+10101SSS    A8+             XRs             A^=S
+00101100    2C              XRI             A^=I
+10110SSS    B0+             ORs             A|=S
+00110100    34              ORI             A|=I
+10111SSS    B8+             CPs             compare S with A
+00111100    3C              CPI             compare I with A
+00DDD000    08+             INd             D++, D!=A
+00DDD001    09+             DCd             D--, D!=A
+
+00000010    02              RLC             rotate A left
+00001010    0A              RRC             rotate A right
+00010010    12              RAL             rotate A left through CF
+00011010    1A              RAR             rotate A right through CF
